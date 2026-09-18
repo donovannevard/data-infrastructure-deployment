@@ -1,4 +1,4 @@
-# Terraform Warehouse Quickstart
+# Data Infrastructure Deployment
 
 A Terraform stack for standing up a new client's data warehouse and ingestion in
 about 30 minutes: modern best-practice RBAC, cost-optimized compute, and your
@@ -69,8 +69,8 @@ no external account to set up just to run `terraform init`.
 
 1. **Clone the repo and pick your warehouse**
    ```bash
-   git clone https://github.com/donovannevard/terraform-warehouse-quickstart.git
-   cd terraform-warehouse-quickstart/snowflake   # or terraform-warehouse-quickstart/redshift
+   git clone https://github.com/donovannevard/data-infrastructure-deployment.git
+   cd data-infrastructure-deployment/snowflake   # or data-infrastructure-deployment/redshift
    ```
 
 2. **Copy and edit variables**
