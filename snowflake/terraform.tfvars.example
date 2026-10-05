@@ -1,34 +1,42 @@
-# Copy this file to terraform.tfvars and fill in the values you need.
-# DO NOT commit terraform.tfvars — it will contain live secrets, and the local
-# state file created by `terraform apply` will too. Both are already gitignored.
+# Copy this file to terraform.tfvars and fill in the values you need:
+#   cp terraform.tfvars.example terraform.tfvars
 #
-# Everything below has a sensible default in variables.tf except account
-# credentials, which only you can supply.
+# DO NOT commit terraform.tfvars — it contains live secrets, and so will the local
+# state file created by `terraform apply`. Both are already gitignored.
+#
+# Everything not listed here has a sensible default in variables.tf.
 
+# ---- What to deploy ----------------------------------------------------------
 use_fivetran = true
 use_airflow  = false
 airflow_type = "mwaa" # "mwaa" or "ec2" (only read when use_airflow = true)
 
-# ---- Snowflake (always required) ------------------------------------------
-snowflake_account_identifier = "ABCDEF-UV12345"
-snowflake_username           = "your-terraform-user"
-snowflake_password           = "xxx"
+# ---- Snowflake (always required) ---------------------------------------------
+# Account identifier: Snowsight > bottom-left account menu > "Connect a tool to
+# Snowflake" > Account identifier (format ORGNAME-ACCOUNTNAME).
+snowflake_account_identifier = "MYORG-MYACCOUNT"
+snowflake_username           = "your-terraform-user" # needs ACCOUNTADMIN
+# Authenticate with ONE of these. Key pair is recommended (and required if your
+# account blocks password-only sign-in) — see the README for a 2-minute setup.
+snowflake_password = "change-me"
+# snowflake_private_key_path = "~/.ssh/snowflake_terraform.p8"
 
-# ---- Fivetran (required when use_fivetran = true) -------------------------
-fivetran_api_key    = "xxx"
-fivetran_api_secret = "xxx"
-fivetran_group_id   = "xxx"
-fivetran_region     = "AWS_EU_WEST_2" # must match your Fivetran group's region
+# ---- Fivetran (required when use_fivetran = true) ----------------------------
+# API key/secret: Fivetran > Account Settings > API Config > Generate API key.
+fivetran_api_key    = "change-me"
+fivetran_api_secret = "change-me"
+fivetran_region     = "AWS_EU_WEST_2" # where Fivetran processes data, e.g. AWS_US_EAST_1
+# fivetran_group_id = "abc_xyz"       # optional: reuse an existing group instead of creating one
 
-# ---- AWS (only required when use_airflow = true) --------------------------
+# ---- AWS (only required when use_airflow = true) -----------------------------
+# Credentials come from your environment (`aws configure` / AWS_PROFILE).
 # aws_region = "eu-west-2"
-# aws_prefix = "acme-co"
+# aws_prefix = "acme-co"   # prefixes every AWS resource name; lowercase letters, digits and hyphens, max 20 chars
 
-# ---- Airflow/EC2-specific (only read when use_airflow = true, airflow_type = "ec2") ----
-# SECURITY: pick your actual office/VPN CIDR here — there is deliberately no
-# default, so it's never accidentally left open to the whole internet.
+# ---- Airflow on EC2 (only read when use_airflow = true and airflow_type = "ec2") ----
+# SECURITY: your office/VPN CIDR. Deliberately has no default.
 # ec2_inbound_cidr_restriction = "203.0.113.0/24"
 # airflow_ec2_admin_email      = "admin@example.com"
-# airflow_ec2_enable_https     = false # true requires airflow_ec2_domain
+# airflow_ec2_enable_https     = false                 # true requires airflow_ec2_domain
 # airflow_ec2_domain           = "airflow.example.com"
-# airflow_ec2_route53_zone_id  = "Z1234567890ABC" # optional: fully automates DNS validation
+# airflow_ec2_route53_zone_id  = "Z1234567890ABC"       # optional: automates certificate DNS validation

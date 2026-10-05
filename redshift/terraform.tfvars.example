@@ -1,33 +1,49 @@
-# Copy this file to terraform.tfvars and fill in the values you need.
-# DO NOT commit terraform.tfvars — it will contain live secrets, and the local
-# state file created by `terraform apply` will too. Both are already gitignored.
+# Copy this file to terraform.tfvars and fill in the values you need:
+#   cp terraform.tfvars.example terraform.tfvars
 #
-# Everything below has a sensible default in variables.tf except account
-# credentials and the CIDR restriction, which only you can supply.
+# DO NOT commit terraform.tfvars — it contains live secrets, and so will the local
+# state file created by `terraform apply`. Both are already gitignored.
+#
+# Everything not listed here has a sensible default in variables.tf.
+# AWS credentials come from your environment (`aws configure` / AWS_PROFILE).
 
+# ---- What to deploy ----------------------------------------------------------
 use_fivetran = true
 use_airflow  = false
 airflow_type = "mwaa" # "mwaa" or "ec2" (only read when use_airflow = true)
 
-# ---- AWS (always required for Redshift) ------------------------------------
+# ---- AWS ---------------------------------------------------------------------
 aws_region = "eu-west-2"
-aws_prefix = "acme-co"
+aws_prefix = "acme-co" # prefixes every AWS resource name; lowercase letters, digits and hyphens, max 20 chars
 
-# ---- Redshift-specific ------------------------------------------------------
-# SECURITY: pick your actual office/VPN CIDR here — there is deliberately no
-# default, so it's never accidentally left open to the whole internet.
-redshift_inbound_cidr_restriction = "203.0.113.0/24"
+# ---- Redshift network access -------------------------------------------------
+# SECURITY: deliberately no default, and 0.0.0.0/0 is rejected.
+# Include your own IP/VPN range (find yours with `curl -s https://checkip.amazonaws.com`)
+# and, if use_fivetran = true, Fivetran's IPs for fivetran_region:
+# https://fivetran.com/docs/using-fivetran/ips
+redshift_allowed_cidrs = ["203.0.113.10/32"]
 
-# ---- Fivetran (required when use_fivetran = true) --------------------------
-fivetran_api_key    = "xxx"
-fivetran_api_secret = "xxx"
-fivetran_group_id   = "xxx"
-fivetran_region     = "AWS_EU_WEST_2" # must match your Fivetran group's region
+# Terraform configures users/schemas/grants by connecting to the cluster, so it
+# must be reachable from wherever you run `terraform apply`. true = public endpoint,
+# still firewalled to redshift_allowed_cidrs (simplest). false = private only; run
+# Terraform from inside the VPC (VPN/bastion) instead.
+redshift_publicly_accessible = true
 
-# ---- Airflow/EC2-specific (only read when use_airflow = true, airflow_type = "ec2") ----
-# SECURITY: same as above — pick your real CIDR, no wide-open default.
+# A final snapshot is taken on `terraform destroy` as a safety net (destroy prints
+# how to delete it). Set true for throwaway test deployments to skip it.
+# redshift_skip_final_snapshot = true
+
+# ---- Fivetran (required when use_fivetran = true) ----------------------------
+# API key/secret: Fivetran > Account Settings > API Config > Generate API key.
+fivetran_api_key    = "change-me"
+fivetran_api_secret = "change-me"
+fivetran_region     = "AWS_EU_WEST_2" # where Fivetran processes data, e.g. AWS_US_EAST_1
+# fivetran_group_id = "abc_xyz"       # optional: reuse an existing group instead of creating one
+
+# ---- Airflow on EC2 (only read when use_airflow = true and airflow_type = "ec2") ----
+# SECURITY: your office/VPN CIDR. Deliberately has no default.
 # ec2_inbound_cidr_restriction = "203.0.113.0/24"
 # airflow_ec2_admin_email      = "admin@example.com"
-# airflow_ec2_enable_https     = false # true requires airflow_ec2_domain
+# airflow_ec2_enable_https     = false                 # true requires airflow_ec2_domain
 # airflow_ec2_domain           = "airflow.example.com"
-# airflow_ec2_route53_zone_id  = "Z1234567890ABC" # optional: fully automates DNS validation
+# airflow_ec2_route53_zone_id  = "Z1234567890ABC"       # optional: automates certificate DNS validation

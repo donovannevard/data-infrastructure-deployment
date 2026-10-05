@@ -1,202 +1,248 @@
 # Data Infrastructure Deployment
 
-A Terraform stack for standing up a new client's data warehouse and ingestion in
-about 30 minutes: modern best-practice RBAC, cost-optimized compute, and your
-choice of components — one `terraform apply` does everything you select.
+[![CI](https://github.com/donovannevard/data-infrastructure-deployment/actions/workflows/ci.yml/badge.svg)](https://github.com/donovannevard/data-infrastructure-deployment/actions/workflows/ci.yml)
+![Terraform](https://img.shields.io/badge/terraform-%3E%3D1.9-7B42BC?logo=terraform)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Supports:
-- **Snowflake** (default / recommended) or **Redshift**
-- **Fivetran** for automated ingestion (default / recommended), optional
-- **Airflow** (optional), via MWAA or a self-hosted EC2 instance
+Terraform that stands up a production-ready analytics platform for a new client
+in a single `terraform apply`: a **Snowflake** or **Redshift** warehouse with
+least-privilege RBAC and cost-optimized compute, **Fivetran** ingestion, and
+optionally **Airflow** (AWS MWAA or self-hosted on EC2).
 
-Designed for separation of concerns:
-- Extraction of raw data from source systems (production DB, third parties, etc.) into the warehouse
-- Transformation of raw data into structured, insightful data with dbt
-- Distribution of structured data via BI tools for analysts to query
+It encodes the setup I'd otherwise repeat by hand on every engagement, so a new
+client gets a consistent, secure foundation for an ELT + dbt workflow in under
+an hour instead of a day of console clicking.
 
----
+```mermaid
+flowchart LR
+    src[("Source systems<br/>prod DBs, SaaS apps")]
+    ext["<b>EXTRACT</b><br/>raw data"]
+    trn["<b>TRANSFORM</b><br/>dbt staging models"]
+    ana["<b>ANALYSIS</b><br/>dbt marts"]
+    bi["BI tools"]
+    ppl["Analysts"]
+    af{{"Airflow<br/>(optional)"}}
 
-## Two entry points, one apply each
+    src -- "Fivetran<br/>EXTRACT user" --> ext
+    ext -- "dbt<br/>TRANSFORM user" --> trn
+    trn -- "dbt" --> ana
+    ana -- "LOAD user" --> bi
+    ana -- "ANALYST_ROLE" --> ppl
+    af -. orchestrates .-> ext
+    af -. orchestrates .-> trn
+```
 
-This repo has two independent, self-contained Terraform stacks — [`snowflake/`](snowflake/)
-and [`redshift/`](redshift/) — sharing the modules in [`modules/`](modules/). Pick the
-one matching your client and `cd` into it; everything else (Fivetran, Airflow, MWAA vs
-EC2) is a variable choice within that directory. **Why two directories instead of one
-`warehouse_type` variable:** the Snowflake Terraform provider authenticates for real
-the moment it's configured, regardless of whether any `snowflake_*` resource actually
-exists in the plan — so a single stack containing both provider blocks would make
-every Redshift deployment fail unless you also had a working Snowflake account. Splitting
-by warehouse avoids that entirely, while each directory is still a single `init/plan/apply`
-with no remote state and nothing hardcoded to a specific account.
+## Highlights
 
----
+- **One apply, any combination.** Pick a warehouse, toggle Fivetran and Airflow on
+  or off. Nothing you didn't ask for is created: Snowflake + Fivetran never touches AWS.
+- **Least-privilege RBAC.** A dedicated service user per stage (`EXTRACT`, `TRANSFORM`,
+  `LOAD`) plus human `ANALYST` and `ADMIN` roles. Future grants mean new tables
+  created by Fivetran or dbt are readable by the right roles automatically.
+- **Cost-optimized compute.** Snowflake gets a separate warehouse per workload
+  (X-Small for loading and BI, Medium for dbt), all auto-suspending after 60 seconds.
+- **Secure by default.** Generated passwords only exposed as sensitive outputs, no
+  `0.0.0.0/0` network defaults (rejected by validation), encrypted storage, private
+  subnets, and an S3 DAG bucket with public access blocked.
+- **Tested offline and live.** Every supported combination is exercised by
+  `terraform test` against mocked providers in CI, and both warehouses have been
+  deployed, verified and torn down against real Snowflake, AWS and Fivetran accounts.
 
-## Features
+## Try it in one minute (no accounts needed)
 
-- **One apply, any combination** — pick Snowflake or Redshift, optionally add Fivetran
-  and/or Airflow, run `terraform apply` once. Nothing you didn't ask for gets created:
-  a pure Snowflake + Fivetran client never touches AWS at all.
-- **Cost-optimized compute**
-  - Snowflake: separate X-SMALL (extract + analysis) and MEDIUM (transform) warehouses, 60s auto-suspend
-  - Redshift: single cluster with schema-based separation + role-based access
-- **RBAC done right**
-  - Service accounts: `EXTRACT`, `TRANSFORM`, `LOAD`
-  - Human roles: `ANALYST_ROLE` (analysis schema only) and `ADMIN_ROLE` (read access across all schemas)
-  - Easy to manually create analyst users (or additional admins) and assign the appropriate roles
-- **Fivetran integration** — configures the new warehouse as a destination, and wires
-  the connection using a dedicated least-privilege `EXTRACT` service user (not the
-  admin/master credentials) on both Snowflake and Redshift.
-- **Airflow integration** — MWAA-hosted or EC2-hosted (Docker Compose behind an ALB),
-  with a versioned, encrypted S3 bucket as the DAG source.
+All you need is [Terraform](https://developer.hashicorp.com/terraform/install) 1.9+.
 
----
+```bash
+git clone https://github.com/donovannevard/data-infrastructure-deployment.git
+cd data-infrastructure-deployment
+make check
+```
 
-## Prerequisites (~5 minutes)
+This checks formatting, validates both stacks, then runs the mocked test suite
+for every warehouse / Fivetran / Airflow combination. No `make`? Run
+`terraform -chdir=snowflake init -backend=false && terraform -chdir=snowflake test`
+(and the same for `redshift`).
 
-- [Terraform](https://developer.hashicorp.com/terraform/install) >= 1.6.0
-- **Redshift, or Airflow with either warehouse:** AWS credentials in your environment
-  (`aws configure` or equivalent) with permission to create VPCs, Redshift clusters,
-  S3 buckets, IAM roles, and (if using Airflow) MWAA/EC2/ALB/ACM resources.
-- **Snowflake:** a Snowflake account and a user with `ACCOUNTADMIN` (or equivalent) to
-  run Terraform with.
-- **Fivetran (optional):** a Fivetran account, an API key/secret
-  ([Fivetran docs](https://fivetran.com/docs/rest-api/getting-started)), and a group ID.
+## Deploy it for real
 
-Nothing else is required to get started — state defaults to a local backend, so there's
-no external account to set up just to run `terraform init`.
+### 1. Prerequisites
 
-## Quickstart (~30 minutes end-to-end for a new client)
+| You need | When |
+|---|---|
+| [Terraform](https://developer.hashicorp.com/terraform/install) 1.9+ | Always |
+| Snowflake account + a user with `ACCOUNTADMIN` ([free trial](https://signup.snowflake.com/)) | Snowflake |
+| AWS credentials in your shell (`aws configure` or `AWS_PROFILE`) | Redshift, or Airflow with either warehouse |
+| Fivetran API key + secret ([free trial](https://fivetran.com/signup), then *Account Settings → API Config*) | `use_fivetran = true` (default) |
 
-1. **Clone the repo and pick your warehouse**
-   ```bash
-   git clone https://github.com/donovannevard/data-infrastructure-deployment.git
-   cd data-infrastructure-deployment/snowflake   # or data-infrastructure-deployment/redshift
-   ```
+State is stored locally by default, so there is nothing else to set up.
 
-2. **Copy and edit variables**
-   ```bash
-   cp terraform.tfvars.example terraform.tfvars
-   ```
-   Almost everything has a sensible default (see `variables.tf`) — you only need to
-   fill in account credentials and (for Redshift, or EC2 Airflow) the CIDR restriction
-   variables, which deliberately have no default so you don't accidentally leave
-   anything open to the whole internet. See the comments in `terraform.tfvars.example`
-   for exactly what's needed for your chosen combination.
+### 2. Configure
 
-3. **Initialize and deploy**
-   ```bash
-   terraform init
-   terraform plan
-   terraform apply
-   ```
-   That's it — one apply creates everything you selected (network, warehouse,
-   Fivetran destination, Airflow) in the correct order automatically.
+Pick the folder that matches your warehouse and copy the example variables:
 
-4. **Retrieve credentials**
-   ```bash
-   terraform output -json snowflake   # or `redshift`, depending on directory
-   ```
-   These, and the local `terraform.tfstate` file itself, contain plaintext secrets.
-   Store them in a password manager and treat the state file as sensitive (see
-   Security Notes below).
+```bash
+cd snowflake        # or: cd redshift
+cp terraform.tfvars.example terraform.tfvars
+```
 
-## Repo Structure
+Open `terraform.tfvars` and replace the `change-me` values. The example file
+lists only what you need to set, with a comment on where to find each value;
+everything else has a sensible default in `variables.tf`.
+
+<details>
+<summary>Snowflake key-pair auth (recommended; required if your account blocks password-only sign-in)</summary>
+
+```bash
+openssl genrsa 2048 | openssl pkcs8 -topk8 -nocrypt -out ~/.ssh/snowflake_terraform.p8
+openssl rsa -in ~/.ssh/snowflake_terraform.p8 -pubout | grep -v "PUBLIC KEY" | tr -d '\n'
+```
+
+In a Snowflake worksheet, as `ACCOUNTADMIN`:
+
+```sql
+CREATE USER TERRAFORM TYPE = SERVICE DEFAULT_ROLE = ACCOUNTADMIN
+  RSA_PUBLIC_KEY = '<output of the second command>';
+GRANT ROLE ACCOUNTADMIN TO USER TERRAFORM;
+```
+
+Then set `snowflake_username = "TERRAFORM"` and
+`snowflake_private_key_path = "~/.ssh/snowflake_terraform.p8"` (and remove
+`snowflake_password`).
+</details>
+
+### 3. Deploy
+
+```bash
+terraform init
+terraform apply
+```
+
+Review the plan and type `yes`. A Snowflake + Fivetran deploy takes a couple of
+minutes. Redshift adds about 10 minutes, and MWAA 30–40 minutes to provision.
+
+### 4. Get your credentials
+
+```bash
+terraform output -json snowflake            # or: redshift, redshift_connection
+terraform output next_steps
+```
+
+Store these in a password manager. The local `terraform.tfstate` also contains
+them in plaintext, so treat it as a secret too.
+
+### 5. Tear down
+
+```bash
+terraform destroy
+```
+
+Redshift, MWAA and the NAT gateway bill by the hour, so destroy test deployments
+when you're done. Redshift keeps a final snapshot on destroy as a safety net, and
+destroy prints the command to delete it. For throwaway test deployments, set
+`redshift_skip_final_snapshot = true` to skip it.
+
+## Configuration
+
+The main switches (full list with defaults in each stack's `variables.tf`):
+
+| Variable | Description | Default |
+|---|---|---|
+| `use_fivetran` | Create a Fivetran group and register the warehouse as its destination | `true` |
+| `use_airflow` | Deploy Airflow | `false` |
+| `airflow_type` | `mwaa` (managed) or `ec2` (Docker Compose behind a load balancer) | `mwaa` |
+| `redshift_allowed_cidrs` | CIDRs allowed to reach Redshift on 5439 *(redshift only)* | required |
+| `redshift_publicly_accessible` | Public endpoint, still firewalled to the CIDRs above *(redshift only)* | `false` |
+| `redshift_skip_final_snapshot` | Skip the safety-net snapshot on destroy (for test deployments) *(redshift only)* | `false` |
+| `airflow_mwaa_webserver_access_mode` | `PUBLIC_ONLY` (UI behind AWS sign-in) or `PRIVATE_ONLY` (VPC only) | `PUBLIC_ONLY` |
+| `ec2_inbound_cidr_restriction` | CIDR allowed to reach the EC2 Airflow UI | required for `ec2` |
+| `airflow_ec2_enable_https` | Serve EC2 Airflow over HTTPS with an ACM certificate | `false` |
+
+## Access model
+
+What each identity can do in each layer (Snowflake roles / Redshift groups):
+
+| Identity | Used by | EXTRACT | TRANSFORM | ANALYSIS |
+|---|---|:-:|:-:|:-:|
+| `EXTRACT` | Fivetran, Airflow extract jobs | write | | |
+| `TRANSFORM` | dbt | read | write | write |
+| `LOAD` | BI tools (Sigma, QuickSight, Looker…) | | | read |
+| `ANALYST_ROLE` / `analyst_group` | Analysts | | | read |
+| `ADMIN_ROLE` / `admin_group` | Senior analysts, admins | read | read | read |
+
+**Snowflake** creates `EXTRACT`, `TRANSFORM` and `ANALYSIS` databases (each with a
+schema of the same name) and warehouses `EXTRACT_WH` (X-Small), `TRANSFORM_WH`
+(Medium) and `ANALYSIS_WH` (X-Small). **Redshift** uses one database with
+`extract`, `transform` and `analysis` schemas, and assigns group membership natively.
+
+Human users are created by hand and given a role:
+
+```sql
+-- Snowflake
+CREATE USER jsmith PASSWORD = '...' MUST_CHANGE_PASSWORD = TRUE
+  DEFAULT_ROLE = ANALYST_ROLE DEFAULT_WAREHOUSE = ANALYSIS_WH;
+GRANT ROLE ANALYST_ROLE TO USER jsmith;
+
+-- Redshift
+CREATE USER jdoe PASSWORD '...';
+ALTER GROUP analyst_group ADD USER jdoe;
+```
+
+## Design decisions
+
+- **Two stacks instead of a `warehouse_type` switch.** The Snowflake provider
+  authenticates as soon as it is configured, even if no Snowflake resources are
+  planned. One combined stack would force every Redshift client to have working
+  Snowflake credentials. [`snowflake/`](snowflake/) and [`redshift/`](redshift/)
+  stay independent while sharing everything in [`modules/`](modules/).
+- **Local state by default.** It needs no setup before a first apply. For team use,
+  swap `backend "local" {}` in `main.tf` for S3 or Terraform Cloud, or declare an
+  empty `backend "s3" {}` and pass `-backend-config` flags at `terraform init`.
+- **Fivetran never uses admin credentials.** The destination authenticates as the
+  `EXTRACT` service user, which can only write to the raw layer.
+- **Redshift is private unless you opt in.** Terraform manages users and grants by
+  connecting to the cluster, so it must be reachable from where you run it. Either
+  set `redshift_publicly_accessible = true` (still limited to your allowed CIDRs, and
+  needed for Fivetran without an SSH tunnel or PrivateLink), or run Terraform from
+  inside the VPC.
+
+## Repository layout
+
 ```
 .
-├── snowflake/            (Snowflake stack: main.tf, variables.tf, outputs.tf, providers.tf)
-├── redshift/             (Redshift stack: same shape as snowflake/)
-└── modules/              (shared by both stacks)
-    ├── aws/               (VPC, Redshift cluster, S3 bucket for DAGs)
-    ├── redshift/          (schemas, users, groups, grants)
-    ├── snowflake/         (warehouses, databases, schemas, roles, users, grants)
-    ├── fivetran/          (destination + connector)
-    ├── airflow_mwaa/
-    └── airflow_ec2/
+├── snowflake/              Snowflake stack (entry point)
+│   └── tests/              mocked tests for each combination
+├── redshift/               Redshift stack (entry point)
+│   └── tests/
+├── modules/                shared by both stacks
+│   ├── snowflake/          warehouses, databases, roles, users, grants
+│   ├── redshift/           schemas, users, groups, grants
+│   ├── aws/                VPC, Redshift cluster, S3 DAG bucket
+│   ├── fivetran/           group + destination
+│   ├── airflow_mwaa/       managed Airflow
+│   └── airflow_ec2/        self-hosted Airflow (Docker Compose + ALB)
+├── tests/mocks/            shared mock data for terraform test
+├── docs/testing.md         live verification checklist
+└── Makefile                make check = fmt + validate + test
 ```
-
-## Key Variables
-See each directory's `variables.tf` for the full list and defaults.
-
-| Variable                            | Description                                  | Default      |
-|--------------------------------------|-----------------------------------------------|--------------|
-| `use_fivetran`                       | Deploy a Fivetran destination + connector      | `true`       |
-| `use_airflow`                        | Deploy Airflow                                | `false`      |
-| `airflow_type`                       | `mwaa` or `ec2`                               | `mwaa`       |
-| `redshift_inbound_cidr_restriction`  | CIDR allowed to reach Redshift (5439)         | *(required, redshift/ only)* |
-| `ec2_inbound_cidr_restriction`       | CIDR allowed to reach EC2 Airflow via the ALB | *(required if ec2 airflow)* |
-| `airflow_ec2_enable_https`           | Serve EC2 Airflow over HTTPS via ACM           | `false`      |
-
-## Warehouse Architecture
-
-### Snowflake
-- **Databases**: `EXTRACT`, `TRANSFORM`, `ANALYSIS`
-- **Schemas**: `extract`, `transform`, `analysis`
-- **Warehouses**: `EXTRACT_WH` (X-SMALL), `TRANSFORM_WH` (MEDIUM), `ANALYSIS_WH` (X-SMALL)
-- **Roles & Users**: Service users (`EXTRACT`, `TRANSFORM`, `LOAD`) + analyst/admin roles
-
-### Redshift
-- Single database with schemas: `extract`, `transform`, `analysis`
-- Equivalent service users and roles, assigned to groups natively (no external
-  `psql` step required)
-
-## Remote state (optional)
-
-By default each stack uses `backend "local" {}` — zero external accounts needed to
-get started, matching the 30-minute goal. The local state file contains plaintext
-secrets, so back it up somewhere encrypted per client (e.g. a password manager, or
-an encrypted volume) rather than leaving it as a bare file.
-
-If you want state locking/collaboration across a team, switch the `backend "local" {}`
-block in `main.tf` to S3 or Terraform Cloud. Terraform backend blocks can't use
-variables, so this is a one-time manual edit per client — or pass `-backend-config`
-flags at `terraform init` time to parameterize it without editing the file, e.g.:
-```bash
-terraform init \
-  -backend-config="bucket=acme-co-tfstate" \
-  -backend-config="key=snowflake/terraform.tfstate" \
-  -backend-config="region=eu-west-2"
-```
-(with `backend "s3" {}` declared empty in `main.tf`).
-
-## Post-Deployment Steps
-### Analysts
-1. Create users manually in Snowflake / Redshift
-2. Grant `ANALYST_ROLE` (read access to the analysis schema/database only)
-3. Senior analysts: also grant `ADMIN_ROLE` (read access across all schemas/databases)
-
-Example (Snowflake):
-```sql
-CREATE USER johnsmith PASSWORD = 'StrongPass123!' MUST_CHANGE_PASSWORD = TRUE;
-GRANT ROLE ANALYST_ROLE TO USER johnsmith;
-```
-
-Example (Redshift):
-```sql
-CREATE USER janedoe PASSWORD 'StrongPass123!';
-ALTER GROUP analyst_group ADD USER janedoe;
-```
-
-## Airflow / dbt / Fivetran
-- Use the `EXTRACT` service user for Fivetran or Airflow extraction into the warehouse
-- Use the `TRANSFORM` service user for dbt transformations of the raw data
-- Use the `LOAD` service user for BI tool connections (QuickSight, Sigma, etc.) to query the structured data output by dbt
-
-## Security Notes
-- All service user passwords are randomly generated and exposed only via sensitive Terraform outputs
-- Least-privilege grants applied throughout, including for the Fivetran connector itself
-  (it authenticates as the `EXTRACT` service user, not the warehouse admin)
-- `must_change_password = false` for service accounts, `true` for human users you create manually
-- `redshift_inbound_cidr_restriction` and `ec2_inbound_cidr_restriction` have no
-  default on purpose — pick your actual office/VPN CIDR, never `0.0.0.0/0`
-- The Redshift cluster is always `publicly_accessible = false`, in private subnets
-- The local state file contains plaintext secrets — treat it like a credentials file
-- Rotate passwords as needed via Terraform (`terraform taint` the relevant
-  `random_password` resource) or directly in the Snowflake/Redshift UI
 
 ## Testing
-See [`docs/testing.md`](docs/testing.md) for a guided walkthrough of applying
-and verifying each combination for real (Snowflake/Redshift × Fivetran ×
-Airflow) before trusting this in front of a client.
 
-## Contributing
-Feel free to open issues or PRs for improvements.
+- **Offline** (`make check`, runs in CI): format check, `terraform validate`, and
+  `terraform test` with mocked providers covering every warehouse × Fivetran ×
+  Airflow combination, plus the input validations (e.g. `0.0.0.0/0` is rejected).
+- **Live**: Snowflake + Fivetran + Airflow (EC2) and Redshift + Fivetran + Airflow
+  (MWAA) have been applied, verified and destroyed cleanly against real accounts,
+  which together exercise every module. [`docs/testing.md`](docs/testing.md)
+  is the checklist for repeating that.
+
+## Security notes
+
+- Service user passwords are randomly generated and only exposed as sensitive outputs.
+  Rotate one with `terraform apply -replace=<random_password resource address>`.
+- Network access is never open by default: the Redshift and EC2 Airflow CIDRs have
+  no default, and `0.0.0.0/0` is rejected for Redshift.
+- `terraform.tfvars` and `*.tfstate` are gitignored; both contain secrets once used.
+
+## License
+
+[MIT](LICENSE)

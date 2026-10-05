@@ -4,6 +4,23 @@ output "redshift" {
   sensitive   = true
 }
 
+output "redshift_connection" {
+  description = "Cluster endpoint and admin (master) credentials"
+  value = {
+    host           = module.aws.redshift.host
+    port           = module.aws.redshift.port
+    database       = module.aws.redshift.database
+    admin_username = module.aws.redshift.username
+    admin_password = module.aws.redshift.password
+  }
+  sensitive = true
+}
+
+output "fivetran_group_id" {
+  description = "Fivetran group the warehouse destination belongs to (if enabled)"
+  value       = try(module.fivetran[0].fivetran_group_id, null)
+}
+
 output "fivetran_destination_id" {
   description = "Fivetran destination ID (if enabled)"
   value       = try(module.fivetran[0].fivetran_destination_id, null)
@@ -41,7 +58,7 @@ output "next_steps" {
 1. Save all sensitive outputs (passwords, tokens, etc.) securely — the local state
    file also contains them in plaintext, so treat terraform.tfstate itself as a secret.
 2. Connect your BI tool (Sigma, QuickSight, etc.) using the warehouse outputs.
-3. If using Fivetran: add source connectors in the Fivetran UI using the destination ID above.
+3. If using Fivetran: add source connectors to the Fivetran group above (Fivetran UI).
 4. If using Airflow: push your DAGs to the correct location (S3 for MWAA, or the DAG
    bucket synced by the EC2 instance every 5 minutes).
 5. If using EC2 Airflow with HTTPS and no Route53 zone ID: add the DNS record from
