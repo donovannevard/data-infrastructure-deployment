@@ -48,6 +48,10 @@ flowchart LR
   `terraform test` against mocked providers in CI, and both warehouses have been
   deployed, verified and torn down against real Snowflake, AWS and Fivetran accounts.
 
+**Companion repo:** [dbt-ecom-data-model](https://github.com/donovannevard/dbt-ecom-data-model)
+is the dbt layer for this platform: an e-commerce revenue, marketing spend and
+attribution project, verified end to end on warehouses deployed from this repo.
+
 ## Try it in one minute (no accounts needed)
 
 All you need is [Terraform](https://developer.hashicorp.com/terraform/install) 1.9+.
@@ -232,7 +236,9 @@ ALTER GROUP analyst_group ADD USER jdoe;
   Airflow combination, plus the input validations (e.g. `0.0.0.0/0` is rejected).
 - **Live**: Snowflake + Fivetran + Airflow (EC2) and Redshift + Fivetran + Airflow
   (MWAA) have been applied, verified and destroyed cleanly against real accounts,
-  which together exercise every module. [`docs/testing.md`](docs/testing.md)
+  which together exercise every module. The companion
+  [dbt project](https://github.com/donovannevard/dbt-ecom-data-model) then built and
+  tested successfully on both. [`docs/testing.md`](docs/testing.md)
   is the checklist for repeating that.
 
 ## Security notes
