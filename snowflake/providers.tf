@@ -8,11 +8,15 @@ provider "aws" {
   skip_requesting_account_id  = !local.needs_aws
 }
 
+# Authenticates with a key pair if snowflake_private_key_path is set (recommended,
+# and required where Snowflake blocks password-only sign-in), otherwise a password.
 provider "snowflake" {
-  account  = var.snowflake_account_identifier
-  user     = var.snowflake_username
-  password = var.snowflake_password
-  role     = var.snowflake_role
+  account          = var.snowflake_account_identifier
+  user             = var.snowflake_username
+  password         = var.snowflake_password
+  private_key_path = var.snowflake_private_key_path != null ? pathexpand(var.snowflake_private_key_path) : null
+  authenticator    = var.snowflake_private_key_path != null ? "JWT" : null
+  role             = var.snowflake_role
 }
 
 # Fivetran - only used when use_fivetran = true

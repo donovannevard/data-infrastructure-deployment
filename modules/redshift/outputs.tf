@@ -18,10 +18,6 @@ output "user_groups" {
 
 output "service_users" {
   value = {
-    admin = {
-      name     = redshift_user.admin.name
-      password = random_password.admin.result
-    }
     extract = {
       name     = redshift_user.extract.name
       password = random_password.extract.result

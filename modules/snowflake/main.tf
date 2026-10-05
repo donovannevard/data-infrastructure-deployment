@@ -163,136 +163,128 @@ resource "snowflake_grant_account_role" "load_user" {
 }
 
 # Assign permissions to roles
-# Extract role (Fivetran)
-resource "snowflake_grant_privileges_to_account_role" "extract_wh" {
-  privileges        = ["USAGE", "OPERATE"]
-  account_role_name = snowflake_role.extract.name
+locals {
+  # Fully qualified, quoted schema identifiers as expected by on_schema grants
+  schema_fqn = {
+    extract   = "\"${snowflake_database.extract.name}\".\"${snowflake_schema.extract.name}\""
+    transform = "\"${snowflake_database.transform.name}\".\"${snowflake_schema.transform.name}\""
+    analysis  = "\"${snowflake_database.analysis.name}\".\"${snowflake_schema.analysis.name}\""
+  }
+
+  # Warehouse access per role
+  warehouse_access = {
+    extract_on_extract     = { role = snowflake_role.extract.name, warehouse = snowflake_warehouse.extract.name, privileges = ["USAGE", "OPERATE"] }
+    transform_on_transform = { role = snowflake_role.transform.name, warehouse = snowflake_warehouse.transform.name, privileges = ["USAGE", "OPERATE"] }
+    load_on_analysis       = { role = snowflake_role.load.name, warehouse = snowflake_warehouse.analysis.name, privileges = ["USAGE"] }
+    analyst_on_analysis    = { role = snowflake_role.analyst.name, warehouse = snowflake_warehouse.analysis.name, privileges = ["USAGE"] }
+    admin_on_extract       = { role = snowflake_role.admin.name, warehouse = snowflake_warehouse.extract.name, privileges = ["USAGE", "OPERATE"] }
+    admin_on_transform     = { role = snowflake_role.admin.name, warehouse = snowflake_warehouse.transform.name, privileges = ["USAGE", "OPERATE"] }
+    admin_on_analysis      = { role = snowflake_role.admin.name, warehouse = snowflake_warehouse.analysis.name, privileges = ["USAGE"] }
+  }
+
+  # Write access: Fivetran lands raw data in EXTRACT (and creates a schema per
+  # connector); dbt builds staging models in TRANSFORM and marts in ANALYSIS.
+  write_access = {
+    extract_on_extract     = { role = snowflake_role.extract.name, database = snowflake_database.extract.name, schema = local.schema_fqn.extract }
+    transform_on_transform = { role = snowflake_role.transform.name, database = snowflake_database.transform.name, schema = local.schema_fqn.transform }
+    transform_on_analysis  = { role = snowflake_role.transform.name, database = snowflake_database.analysis.name, schema = local.schema_fqn.analysis }
+  }
+
+  # Read access: USAGE on the database and its schemas, SELECT on its tables and
+  # views, including ones created later (future grants). All future grants are
+  # database-level on purpose, since schema-level future grants would silently
+  # override them.
+  read_access = {
+    transform_on_extract = { role = snowflake_role.transform.name, database = snowflake_database.extract.name }
+    load_on_analysis     = { role = snowflake_role.load.name, database = snowflake_database.analysis.name }
+    analyst_on_analysis  = { role = snowflake_role.analyst.name, database = snowflake_database.analysis.name }
+    admin_on_extract     = { role = snowflake_role.admin.name, database = snowflake_database.extract.name }
+    admin_on_transform   = { role = snowflake_role.admin.name, database = snowflake_database.transform.name }
+    admin_on_analysis    = { role = snowflake_role.admin.name, database = snowflake_database.analysis.name }
+  }
+  read_objects = {
+    for pair in setproduct(keys(local.read_access), ["TABLES", "VIEWS"]) :
+    "${pair[0]}_${lower(pair[1])}" => merge(local.read_access[pair[0]], { object_type_plural = pair[1] })
+  }
+}
+
+# Warehouses
+resource "snowflake_grant_privileges_to_account_role" "warehouse" {
+  for_each          = local.warehouse_access
+  privileges        = each.value.privileges
+  account_role_name = each.value.role
   on_account_object {
     object_type = "WAREHOUSE"
-    object_name = snowflake_warehouse.extract.name
+    object_name = each.value.warehouse
   }
 }
-resource "snowflake_grant_privileges_to_account_role" "extract_db" {
-  privileges        = ["USAGE", "CREATE SCHEMA", "CREATE TABLE"]
-  account_role_name = snowflake_role.extract.name
+
+# Write access
+resource "snowflake_grant_privileges_to_account_role" "write_db" {
+  for_each          = local.write_access
+  privileges        = ["USAGE", "CREATE SCHEMA", "MONITOR"]
+  account_role_name = each.value.role
   on_account_object {
     object_type = "DATABASE"
-    object_name = snowflake_database.extract.name
+    object_name = each.value.database
   }
 }
-resource "snowflake_grant_privileges_to_account_role" "extract_schema" {
-  privileges        = ["CREATE TABLE", "INSERT", "UPDATE", "DELETE", "USAGE"]
-  account_role_name = snowflake_role.extract.name
+resource "snowflake_grant_privileges_to_account_role" "write_schema" {
+  for_each          = local.write_access
+  privileges        = ["USAGE", "CREATE TABLE", "CREATE VIEW"]
+  account_role_name = each.value.role
   on_schema {
-    schema_name = snowflake_database.extract.name
+    schema_name = each.value.schema
   }
 }
 
-# Transform role (dbt)
-resource "snowflake_grant_privileges_to_account_role" "transform_wh1" {
-  privileges        = ["USAGE", "OPERATE"]
-  account_role_name = snowflake_role.transform.name
-  on_account_object {
-    object_type = "WAREHOUSE"
-    object_name = snowflake_warehouse.transform.name
-  }
-}
-resource "snowflake_grant_privileges_to_account_role" "transform_wh2" {
-  privileges        = ["USAGE", "OPERATE"]
-  account_role_name = snowflake_role.transform.name
-  on_account_object {
-    object_type = "WAREHOUSE"
-    object_name = snowflake_warehouse.extract.name
-  }
-}
-resource "snowflake_grant_privileges_to_account_role" "transform_dbs1" {
-  privileges        = ["USAGE", "CREATE SCHEMA", "CREATE TABLE", "CREATE VIEW"]
-  account_role_name = snowflake_role.transform.name
-  on_account_object {
-    object_type = "DATABASE"
-    object_name = snowflake_database.transform.name
-  }
-}
-resource "snowflake_grant_privileges_to_account_role" "transform_dbs2" {
-  privileges        = ["USAGE", "SELECT"]
-  account_role_name = snowflake_role.transform.name
-  on_account_object {
-    object_type = "DATABASE"
-    object_name = snowflake_database.extract.name
-  }
-}
-
-# Analysis/BI role
-resource "snowflake_grant_privileges_to_account_role" "load_wh" {
+# Read access
+resource "snowflake_grant_privileges_to_account_role" "read_db" {
+  for_each          = local.read_access
   privileges        = ["USAGE"]
-  account_role_name = snowflake_role.load.name
-  on_account_object {
-    object_type = "WAREHOUSE"
-    object_name = snowflake_warehouse.analysis.name
-  }
-}
-resource "snowflake_grant_privileges_to_account_role" "load_db" {
-  privileges        = ["USAGE"]
-  account_role_name = snowflake_role.load.name
+  account_role_name = each.value.role
   on_account_object {
     object_type = "DATABASE"
-    object_name = snowflake_database.analysis.name
+    object_name = each.value.database
   }
 }
-
-# Analyst role
-resource "snowflake_grant_privileges_to_account_role" "analysis_wh" {
+resource "snowflake_grant_privileges_to_account_role" "read_schemas_existing" {
+  for_each          = local.read_access
   privileges        = ["USAGE"]
-  account_role_name = snowflake_role.analyst.name
-  on_account_object {
-    object_type = "WAREHOUSE"
-    object_name = snowflake_warehouse.analysis.name
+  account_role_name = each.value.role
+  on_schema {
+    all_schemas_in_database = each.value.database
   }
+  depends_on = [snowflake_schema.extract, snowflake_schema.transform, snowflake_schema.analysis]
 }
-resource "snowflake_grant_privileges_to_account_role" "analysis_db" {
-  privileges        = ["USAGE", "SELECT"]
-  account_role_name = snowflake_role.analyst.name
-  on_account_object {
-    object_type = "DATABASE"
-    object_name = snowflake_database.analysis.name
-  }
-}
-
-# Admin role (read access across all 3 databases)
-resource "snowflake_grant_privileges_to_account_role" "admin_whs1" {
-  privileges        = ["USAGE", "OPERATE"]
-  account_role_name = snowflake_role.admin.name
-  on_account_object {
-    object_type = "WAREHOUSE"
-    object_name = snowflake_warehouse.extract.name
-  }
-}
-resource "snowflake_grant_privileges_to_account_role" "admin_whs2" {
-  privileges        = ["USAGE", "OPERATE"]
-  account_role_name = snowflake_role.admin.name
-  on_account_object {
-    object_type = "WAREHOUSE"
-    object_name = snowflake_warehouse.transform.name
-  }
-}
-resource "snowflake_grant_privileges_to_account_role" "admin_whs3" {
+resource "snowflake_grant_privileges_to_account_role" "read_schemas_future" {
+  for_each          = local.read_access
   privileges        = ["USAGE"]
-  account_role_name = snowflake_role.admin.name
-  on_account_object {
-    object_type = "WAREHOUSE"
-    object_name = snowflake_warehouse.analysis.name
+  account_role_name = each.value.role
+  on_schema {
+    future_schemas_in_database = each.value.database
   }
 }
-resource "snowflake_grant_privileges_to_account_role" "admin_dbs" {
-  for_each = {
-    extract   = snowflake_database.extract.name
-    transform = snowflake_database.transform.name
-    analysis  = snowflake_database.analysis.name
+resource "snowflake_grant_privileges_to_account_role" "read_objects_existing" {
+  for_each          = local.read_objects
+  privileges        = ["SELECT"]
+  account_role_name = each.value.role
+  on_schema_object {
+    all {
+      object_type_plural = each.value.object_type_plural
+      in_database        = each.value.database
+    }
   }
-  privileges        = ["USAGE", "SELECT"]
-  account_role_name = snowflake_role.admin.name
-  on_account_object {
-    object_type = "DATABASE"
-    object_name = each.value
+  depends_on = [snowflake_schema.extract, snowflake_schema.transform, snowflake_schema.analysis]
+}
+resource "snowflake_grant_privileges_to_account_role" "read_objects_future" {
+  for_each          = local.read_objects
+  privileges        = ["SELECT"]
+  account_role_name = each.value.role
+  on_schema_object {
+    future {
+      object_type_plural = each.value.object_type_plural
+      in_database        = each.value.database
+    }
   }
 }

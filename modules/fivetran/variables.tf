@@ -1,10 +1,20 @@
 variable "warehouse_type" {
   description = "Which warehouse is being used (snowflake or redshift)"
   type        = string
+
+  validation {
+    condition     = contains(["snowflake", "redshift"], var.warehouse_type)
+    error_message = "warehouse_type must be one of: snowflake or redshift"
+  }
 }
 
 variable "fivetran_group_id" {
-  description = "Fivetran group ID (create via fivetran_group resource or UI)"
+  description = "Existing Fivetran group to use. Null creates a new group named fivetran_group_name."
+  type        = string
+  default     = null
+}
+variable "fivetran_group_name" {
+  description = "Name for the Fivetran group created when fivetran_group_id is null"
   type        = string
 }
 variable "fivetran_region" {
@@ -16,24 +26,17 @@ variable "fivetran_time_zone_offset" {
   type        = string
 }
 
-variable "account" {
-  description = "Snowflake account identifier (e.g. xy12345.us-east-1.aws)"
-  type        = string
-  default     = null
-}
-variable "database" {
-  description = "Database name to use in the query connection string"
-  type        = string
-}
 variable "host" {
-  description = "Host for the connection string"
+  description = "Warehouse hostname (e.g. <account>.snowflakecomputing.com, or the Redshift cluster endpoint)"
   type        = string
-  default     = null
 }
 variable "port" {
-  description = "Port for the connection string"
+  description = "Warehouse port"
   type        = number
-  default     = null
+}
+variable "database" {
+  description = "Database Fivetran should load into"
+  type        = string
 }
 variable "user" {
   description = "Username for the database user that will perform the extract queries"
@@ -42,9 +45,10 @@ variable "user" {
 variable "password" {
   description = "Password for the database user that will perform the extract queries"
   type        = string
+  sensitive   = true
 }
 variable "role" {
-  description = "User role for interacting with the data warehouse"
+  description = "Snowflake role for the extract user (null for Redshift)"
   type        = string
   default     = null
 }

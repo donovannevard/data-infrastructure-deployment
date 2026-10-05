@@ -21,8 +21,9 @@ variable "domain_name" {
   default     = null
 }
 variable "admin_email" {
-  description = "Airflow admin email"
+  description = "Airflow admin email (defaults to admin@example.com)"
   type        = string
+  default     = null
 }
 variable "aws_s3_bucket_name" {
   description = "The S3 bucket name to use for DAGs"

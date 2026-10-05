@@ -11,13 +11,17 @@ terraform {
   }
 }
 
-# AMI
-data "aws_ami" "amazon_linux_2" {
+# AMI: latest Amazon Linux 2023 (standard, not minimal)
+data "aws_ami" "amazon_linux_2023" {
   most_recent = true
   owners      = ["amazon"]
   filter {
     name   = "name"
-    values = ["amzn2-ami-hvm-*-x86_64-gp2"]
+    values = ["al2023-ami-2023.*-kernel-*-x86_64"]
+  }
+  filter {
+    name   = "architecture"
+    values = ["x86_64"]
   }
 }
 
@@ -25,14 +29,22 @@ data "aws_ami" "amazon_linux_2" {
 resource "random_password" "admin" {
   length           = 20
   special          = true
-  override_special = "!@#$%^&*()_+-="
+  override_special = "!#%^*()_+-=" # no quotes, so it can be safely single-quoted in user data
+}
+resource "random_password" "postgres" {
+  length  = 32
+  special = false # embedded in a connection URL, so keep it URL-safe
 }
 resource "aws_instance" "airflow" {
-  ami                    = data.aws_ami.amazon_linux_2.id
+  ami                    = data.aws_ami.amazon_linux_2023.id
   instance_type          = var.ec2_instance_type
   subnet_id              = var.private_subnet_ids[0]
   vpc_security_group_ids = [aws_security_group.airflow_ec2.id]
   iam_instance_profile   = aws_iam_instance_profile.airflow.name
+
+  metadata_options {
+    http_tokens = "required" # IMDSv2 only
+  }
 
   root_block_device {
     volume_size = 100
@@ -41,10 +53,11 @@ resource "aws_instance" "airflow" {
   }
 
   user_data = base64encode(templatefile("${path.module}/user_data_airflow.sh", {
-    aws_region     = var.aws_region
-    admin_email    = var.admin_email
-    admin_password = random_password.admin.result
-    dag_bucket     = var.aws_s3_bucket_name
+    aws_region        = var.aws_region
+    admin_email       = coalesce(var.admin_email, "admin@example.com")
+    admin_password    = random_password.admin.result
+    postgres_password = random_password.postgres.result
+    dag_bucket        = var.aws_s3_bucket_name
   }))
 }
 

@@ -1,5 +1,5 @@
 terraform {
-  required_version = ">= 1.6.0"
+  required_version = ">= 1.9.0"
   required_providers {
     snowflake = {
       source  = "snowflakedb/snowflake"
@@ -51,10 +51,12 @@ module "fivetran" {
 
   warehouse_type            = "snowflake"
   fivetran_group_id         = var.fivetran_group_id
+  fivetran_group_name       = var.fivetran_group_name
   fivetran_region           = var.fivetran_region
   fivetran_time_zone_offset = var.fivetran_time_zone_offset
 
-  account  = var.snowflake_account_identifier
+  host     = "${var.snowflake_account_identifier}.snowflakecomputing.com"
+  port     = 443
   database = module.snowflake.databases.extract
   user     = module.snowflake.service_users.extract.name
   password = module.snowflake.service_users.extract.password
@@ -66,15 +68,14 @@ module "aws" {
   count  = local.needs_aws ? 1 : 0
   source = "../modules/aws"
 
-  warehouse_type         = "snowflake"
-  use_airflow            = var.use_airflow
-  public_subnet_ids      = var.public_subnet_ids
-  private_subnet_ids     = var.private_subnet_ids
-  aws_prefix             = var.aws_prefix
-  admin_user_name        = var.db_admin_user_name
-  aws_region             = var.aws_region
-  aws_vpc_cidr           = var.aws_vpc_cidr
-  aws_private_subnet_ids = var.private_subnet_ids
+  warehouse_type       = "snowflake"
+  use_airflow          = var.use_airflow
+  public_subnet_cidrs  = var.public_subnet_cidrs
+  private_subnet_cidrs = var.private_subnet_cidrs
+  aws_prefix           = var.aws_prefix
+  admin_user_name      = var.db_admin_user_name
+  aws_region           = var.aws_region
+  aws_vpc_cidr         = var.aws_vpc_cidr
 }
 
 # Airflow
@@ -86,12 +87,13 @@ module "airflow_mwaa" {
   aws_prefix         = var.aws_prefix
   aws_vpc_id         = module.aws[0].vpc_id
   aws_vpc_cidr       = var.aws_vpc_cidr
-  private_subnet_ids = var.private_subnet_ids
+  private_subnet_ids = module.aws[0].private_subnet_ids
 
-  mwaa_environment     = var.airflow_mwaa_environment
-  aws_s3_bucket_name   = module.aws[0].aws_s3_bucket.airflow[0].bucket
-  aws_s3_bucket_arn    = module.aws[0].aws_s3_bucket.airflow[0].arn
-  redshift_cluster_arn = null
+  mwaa_environment      = var.airflow_mwaa_environment
+  webserver_access_mode = var.airflow_mwaa_webserver_access_mode
+  aws_s3_bucket_name    = module.aws[0].aws_s3_bucket.airflow[0].bucket
+  aws_s3_bucket_arn     = module.aws[0].aws_s3_bucket.airflow[0].arn
+  redshift_cluster_arn  = null
 }
 
 module "airflow_ec2" {
@@ -102,8 +104,8 @@ module "airflow_ec2" {
   aws_prefix         = var.aws_prefix
   aws_region         = var.aws_region
   aws_vpc_id         = module.aws[0].vpc_id
-  private_subnet_ids = var.private_subnet_ids
-  public_subnet_ids  = var.public_subnet_ids
+  private_subnet_ids = module.aws[0].private_subnet_ids
+  public_subnet_ids  = module.aws[0].public_subnet_ids
 
   domain_name                  = var.airflow_ec2_domain
   admin_email                  = var.airflow_ec2_admin_email

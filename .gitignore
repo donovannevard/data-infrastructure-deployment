@@ -60,3 +60,6 @@ Thumbs.db
 
 # Mac/Linux temp files
 ._*
+
+# Local AI assistant / dev tooling config
+.claude/

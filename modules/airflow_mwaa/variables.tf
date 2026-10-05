@@ -15,7 +15,7 @@ variable "aws_vpc_cidr" {
   type        = string
 }
 variable "private_subnet_ids" {
-  description = "Private subnet IDs (MWAA must be in private subnets)"
+  description = "Private subnet IDs (MWAA uses the first two; they must be in different AZs)"
   type        = list(string)
 }
 
@@ -37,13 +37,18 @@ variable "redshift_cluster_arn" {
   default     = null
 }
 
+variable "webserver_access_mode" {
+  description = "PUBLIC_ONLY (UI reachable from the internet, still behind AWS IAM sign-in) or PRIVATE_ONLY (UI only reachable from inside the VPC)"
+  type        = string
+  default     = "PUBLIC_ONLY"
+}
 variable "mwaa_max_workers" {
   description = "MWAA max workers"
   type        = number
   default     = 5
 }
 variable "mwaa_dag_concurrency" {
-  description = "MWAA dag concurrency settings"
+  description = "MWAA max active tasks per DAG"
   type        = string
   default     = "16"
 }

@@ -24,10 +24,6 @@ variable "aws_vpc_cidr" {
   description = "VPC CIDR for AWS"
   type        = string
 }
-variable "aws_private_subnet_ids" {
-  description = "Private subnet IDs"
-  type        = list(string)
-}
 variable "aws_prefix" {
   description = "AWS prefix for differentiating resources"
   type        = string
@@ -36,24 +32,34 @@ variable "aws_prefix" {
 variable "redshift_node_type" {
   description = "Redshift node type (unused when warehouse_type != \"redshift\")"
   type        = string
-  default     = "dc2.large"
+  default     = "ra3.large"
 }
 variable "redshift_node_count" {
-  description = "Number of nodes in the cluster (unused when warehouse_type != \"redshift\")"
+  description = "Number of nodes in the cluster; 1 = single-node (unused when warehouse_type != \"redshift\")"
   type        = number
-  default     = 2
+  default     = 1
 }
-variable "redshift_inbound_cidr_restriction" {
-  description = "Inbound CIDR restriction on the Redshift instance (unused when warehouse_type != \"redshift\")"
-  type        = string
-  default     = null
+variable "redshift_allowed_cidrs" {
+  description = "CIDRs allowed to reach the Redshift cluster on port 5439 (unused when warehouse_type != \"redshift\")"
+  type        = list(string)
+  default     = []
+}
+variable "redshift_skip_final_snapshot" {
+  description = "Skip the final snapshot when the Redshift cluster is destroyed (unused when warehouse_type != \"redshift\")"
+  type        = bool
+  default     = false
+}
+variable "redshift_publicly_accessible" {
+  description = "Place the Redshift cluster in public subnets with a public endpoint (unused when warehouse_type != \"redshift\")"
+  type        = bool
+  default     = false
 }
 
-variable "private_subnet_ids" {
-  description = "Private subnet IDs"
+variable "private_subnet_cidrs" {
+  description = "CIDR blocks for the VPC's private subnets (one per AZ)"
   type        = list(string)
 }
-variable "public_subnet_ids" {
-  description = "Public subnet IDs (for ALB)"
+variable "public_subnet_cidrs" {
+  description = "CIDR blocks for the VPC's public subnets (one per AZ)"
   type        = list(string)
 }
