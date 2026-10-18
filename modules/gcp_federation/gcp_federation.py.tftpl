@@ -1,0 +1,48 @@
+"""Keyless BigQuery access from Airflow running on AWS (managed by Terraform).
+
+Google's auth libraries exchange this Airflow role's AWS identity for a short-
+lived token for a BigQuery service account, using the credential configuration
+files next to this one. Every task starts out authenticated as TRANSFORM with
+no code: on EC2 Airflow, Terraform sets GOOGLE_APPLICATION_CREDENTIALS and the
+AWS credentials come from the instance metadata service; on MWAA, where Google's
+libraries can't see Fargate's role credentials, a Terraform-deployed plugin
+calls use_aws_role_for_gcp() before each task. Call it yourself only to switch
+stage:
+
+    from gcp.gcp_federation import use_aws_role_for_gcp
+
+    use_aws_role_for_gcp("extract")   # act as the EXTRACT service account
+    use_aws_role_for_gcp()            # back to TRANSFORM
+
+Anything using Application Default Credentials then authenticates as that
+service account: google.cloud.bigquery.Client(), dbt-bigquery with
+`method: oauth`, and Airflow's Google operators.
+"""
+
+import os
+
+PROJECT_ID = "${project_id}"
+_HERE = os.path.dirname(os.path.abspath(__file__))
+
+
+def use_aws_role_for_gcp(stage: str = "transform") -> str:
+    """Point Google's libraries at the given stage's service account.
+
+    Returns the credential configuration path. The exported AWS credentials are
+    the task's own temporary ones, valid for at least an hour.
+    """
+    import boto3  # imported lazily so the scheduler never pays for it
+
+    session = boto3.Session()
+    credentials = session.get_credentials().get_frozen_credentials()
+    os.environ["AWS_ACCESS_KEY_ID"] = credentials.access_key
+    os.environ["AWS_SECRET_ACCESS_KEY"] = credentials.secret_key
+    if credentials.token:
+        os.environ["AWS_SESSION_TOKEN"] = credentials.token
+    if session.region_name:
+        os.environ.setdefault("AWS_REGION", session.region_name)
+
+    path = os.path.join(_HERE, f"{stage}_credentials.json")
+    os.environ["GOOGLE_APPLICATION_CREDENTIALS"] = path
+    os.environ.setdefault("GOOGLE_CLOUD_PROJECT", PROJECT_ID)
+    return path
